@@ -1,0 +1,13 @@
+{
+    "version": 2,
+    "framework": null,
+    "buildCommand": "cd frontend/life-impact-planner && npm install && npm run build",
+    "outputDirectory": "frontend/life-impact-planner/dist",
+    "installCommand": "echo 'skipping root install'",
+    "rewrites": [
+        {
+            "source": "/(.*)",
+            "destination": "/index.html"
+        }
+    ]
+}
