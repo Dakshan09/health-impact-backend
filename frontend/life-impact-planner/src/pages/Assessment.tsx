@@ -166,10 +166,19 @@ const Assessment = () => {
         const apiBase = (import.meta.env.VITE_API_BASE_URL && import.meta.env.VITE_API_BASE_URL !== "/")
           ? import.meta.env.VITE_API_BASE_URL.replace(/\/$/, "")
           : "https://health-impact-backend.onrender.com";
+
+        // Wake up Render backend (free tier cold start can take 30-60s)
+        try {
+          await fetch(`${apiBase}/health`, { method: "GET", signal: AbortSignal.timeout(60000) });
+        } catch (_) {
+          // ignore — we'll let the main request fail if server is truly down
+        }
+
         const response = await fetch(`${apiBase}/api/submit`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           mode: "cors",
+          signal: AbortSignal.timeout(120000), // 2 min timeout for full pipeline
           body: JSON.stringify({ patientData: formData }),
         });
 

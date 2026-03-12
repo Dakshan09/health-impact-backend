@@ -7,7 +7,9 @@ import os
 from datetime import datetime
 from dotenv import load_dotenv
 
-load_dotenv()
+# Force load from the backend root .env (works both locally and on Render)
+_backend_env = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), ".env")
+load_dotenv(_backend_env)
 
 _client = None
 

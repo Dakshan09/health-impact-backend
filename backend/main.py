@@ -26,21 +26,43 @@ load_dotenv(env_path)
 
 app = FastAPI(title="Health Impact Analyzer API")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:8080",
-        "http://localhost:3000",
-        "http://localhost:5173",
-        "http://127.0.0.1:8080",
-        "https://antigravity-health.vercel.app",
-        "https://health-impact-analyzer.vercel.app"
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["content-disposition"],
-)
+# ─── CORS ─────────────────────────────────────────────────────────────────────
+# Allow all Vercel preview deployments (*.vercel.app) plus local dev
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request as StarletteRequest
+from starlette.responses import Response as StarletteResponse
+import re
+
+ALLOWED_ORIGIN_PATTERNS = [
+    r"^http://localhost(:\d+)?$",
+    r"^http://127\.0\.0\.1(:\d+)?$",
+    r"^https://[\w-]+(\.[\w-]+)*\.vercel\.app$",
+    r"^https://antigravity-health\.vercel\.app$",
+    r"^https://health-impact-analyzer\.vercel\.app$",
+]
+
+def _is_allowed_origin(origin: str) -> bool:
+    return any(re.match(p, origin) for p in ALLOWED_ORIGIN_PATTERNS)
+
+class DynamicCORSMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: StarletteRequest, call_next):
+        origin = request.headers.get("origin", "")
+        allowed = _is_allowed_origin(origin)
+
+        if request.method == "OPTIONS":
+            response = StarletteResponse(status_code=204)
+        else:
+            response = await call_next(request)
+
+        if allowed:
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+            response.headers["Access-Control-Allow-Headers"] = "*"
+            response.headers["Access-Control-Expose-Headers"] = "content-disposition"
+        return response
+
+app.add_middleware(DynamicCORSMiddleware)
 
 # ─── Predict ────────────────────────────────────────────────────────────────
 
@@ -194,21 +216,23 @@ async def submit_assessment(request: ReportRequest):
         print(f"WARN: Schedule report generation failed: {e}".encode("ascii", "replace").decode("ascii"))
         traceback.print_exc()
 
-    # ── Step 6: Save to Supabase ─────────────────────────────────────────
+    # ── Step 6: Save to Supabase (non-blocking — never stops email) ──────
     assessment_id = ""
     try:
-        from tools.data_management.supabase_client import save_assessment, save_report_record
+        from tools.data_management.supabase_client import save_assessment
         assessment_id = save_assessment(patient_data, analysis, overall_risk)
     except Exception as e:
-        print(f"FAILED: Supabase save_assessment failed: {e}".encode("ascii", "replace").decode("ascii"))
-        traceback.print_exc()
+        print(f"WARN: Supabase save_assessment failed (continuing): {str(e)[:200]}")
 
     # ── Step 7: Send Email with Attachments ──────────────────────────────
+    # This ALWAYS runs regardless of Supabase success/failure above
     email_sent = False
     if patient_email:
         try:
             from tools.communication.email_delivery import send_reports_email
             attachments = [p for p in [clinical_path, visualization_path, schedule_path] if p and os.path.exists(p)]
+            print(f"INFO: Sending email to {patient_email} with {len(attachments)} attachment(s)")
+            print(f"INFO: Attachment paths: {attachments}")
             email_sent = send_reports_email(
                 to_address=patient_email,
                 patient_name=patient_name,
@@ -216,11 +240,14 @@ async def submit_assessment(request: ReportRequest):
                 overall_risk=overall_risk,
                 attachments=attachments,
             )
+            print(f"INFO: email_sent = {email_sent}")
         except Exception as e:
-            print(f"WARN: Email sending failed: {e}".encode("ascii", "replace").decode("ascii"))
+            print(f"WARN: Email sending failed: {str(e)[:300]}")
             traceback.print_exc()
+    else:
+        print("WARN: No patient email provided — skipping email send")
 
-    # ── Step 8: Save Report Record to Supabase ────────────────────────────
+    # ── Step 8: Save Report Record to Supabase (non-blocking) ─────────────
     try:
         from tools.data_management.supabase_client import save_report_record
         save_report_record(
@@ -233,8 +260,7 @@ async def submit_assessment(request: ReportRequest):
             email_sent=email_sent,
         )
     except Exception as e:
-        print(f"WARN: Supabase save_report_record failed: {e}".encode("ascii", "replace").decode("ascii"))
-        traceback.print_exc()
+        print(f"WARN: Supabase save_report_record failed (non-blocking): {str(e)[:200]}")
 
     # ─── Return summary ───────────────────────────────────────────────────
     return {

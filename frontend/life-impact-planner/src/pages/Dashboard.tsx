@@ -106,9 +106,17 @@ const Dashboard = () => {
     setDownloading((prev) => ({ ...prev, [type]: true }));
 
     try {
+      // Wake up Render backend if sleeping (free tier cold start ~30-60s)
+      try {
+        await fetch(`${API_BASE}/health`, { method: "GET", signal: AbortSignal.timeout(60000) });
+      } catch (_) {
+        // ignore
+      }
+
       const response = await fetch(`${API_BASE}/api/report/${type}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(120000), // 2 min — report generation can be slow
         body: JSON.stringify({
           patientData,
           analysis: analysis || undefined,
@@ -146,9 +154,12 @@ const Dashboard = () => {
         description: `${labels[type]} is downloading.`,
       });
     } catch (err: any) {
+      const isTimeout = err?.name === "TimeoutError" || err?.name === "AbortError";
       toast({
         title: "Download failed",
-        description: err.message || "Could not generate report. Is the server running?",
+        description: isTimeout
+          ? "Server took too long to respond. The backend may be starting up — please wait 30 seconds and try again."
+          : (err.message || "Could not generate report. Please try again."),
         variant: "destructive",
       });
     } finally {
