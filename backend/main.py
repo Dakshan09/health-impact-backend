@@ -279,6 +279,96 @@ async def submit_assessment(request: ReportRequest):
         "lifestyle_scores": lifestyle_scores,
     }
 
+# ─── Email Reports (standalone — lighter than /api/submit) ────────────────────
+
+class EmailReportRequest(BaseModel):
+    patientData: dict
+    analysis: Optional[str] = None
+    email: Optional[str] = None  # override patient email
+
+@app.post("/api/email-reports")
+async def email_reports(request: EmailReportRequest):
+    """Generate reports and email them — standalone endpoint for Dashboard use."""
+    patient_data = request.patientData
+    analysis = request.analysis or ""
+    patient_name = patient_data.get("fullName") or "Patient"
+    patient_email = request.email or patient_data.get("email") or ""
+
+    if not patient_email:
+        raise HTTPException(status_code=400, detail="No email address provided")
+
+    safe_name = "".join(c if c.isalnum() else "_" for c in patient_name)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    tmp_dir = os.path.join(tempfile.gettempdir(), "user_reports")
+    os.makedirs(tmp_dir, exist_ok=True)
+
+    # AI Prediction if not provided
+    if not analysis:
+        try:
+            pred_request = PredictionRequest(**_sanitize_patient_data(patient_data))
+            analysis = generate_health_prediction(pred_request.model_dump())
+        except Exception as e:
+            analysis = f"AI analysis unavailable: {str(e)}"
+
+    # Risk data
+    dashboard = create_risk_visualization(analysis, patient_data)
+    risk_categories = dashboard.get("risk_categories", {})
+    lifestyle_scores = dashboard.get("lifestyle_scores", {})
+    overall_risk = dashboard.get("overall_risk", "Unknown")
+
+    # Generate Clinical PDF
+    clinical_path = ""
+    try:
+        report_md = generate_medical_report(
+            prediction_text=analysis, patient_name=patient_name,
+            patient_data=patient_data, risk_categories=risk_categories,
+        )
+        clinical_path = compile_pdf(report_md, os.path.join(tmp_dir, f"clinical_{safe_name}_{timestamp}.pdf"))
+    except Exception as e:
+        print(f"WARN: Clinical report failed: {e}")
+
+    # Generate Visualization HTML
+    visualization_path = ""
+    try:
+        html_content = build_visualization_html(
+            patient_name=patient_name, patient_data=patient_data,
+            risk_categories=risk_categories, lifestyle_scores=lifestyle_scores,
+            overall_risk=overall_risk, analysis=analysis,
+        )
+        html_path = os.path.join(tmp_dir, f"visualization_{safe_name}_{timestamp}.html")
+        with open(html_path, "w", encoding="utf-8") as f:
+            f.write(html_content)
+        visualization_path = html_path
+    except Exception as e:
+        print(f"WARN: Visualization report failed: {e}")
+
+    # Generate Schedule Excel
+    schedule_path = ""
+    try:
+        schedule = generate_intervention_schedule(
+            patient_data=patient_data, risk_categories=risk_categories, duration_days=30,
+        )
+        xlsx_path = os.path.join(tmp_dir, f"schedule_{safe_name}_{timestamp}.xlsx")
+        _build_schedule_excel(schedule, xlsx_path)
+        schedule_path = xlsx_path
+    except Exception as e:
+        print(f"WARN: Schedule report failed: {e}")
+
+    # Send email
+    from tools.communication.email_delivery import send_reports_email
+    attachments = [p for p in [clinical_path, visualization_path, schedule_path] if p and os.path.exists(p)]
+    email_sent = send_reports_email(
+        to_address=patient_email, patient_name=patient_name,
+        analysis_summary=analysis, overall_risk=overall_risk, attachments=attachments,
+    )
+
+    return {
+        "success": email_sent,
+        "email_sent": email_sent,
+        "email_address": patient_email,
+        "attachments_count": len(attachments),
+    }
+
 # ─── Clinical PDF Report ─────────────────────────────────────────────────────
 
 @app.post("/api/report/clinical")

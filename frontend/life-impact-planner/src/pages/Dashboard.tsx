@@ -17,6 +17,7 @@ import {
   BarChart3,
   Calendar,
   Loader2,
+  Mail,
 } from "lucide-react";
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL && import.meta.env.VITE_API_BASE_URL !== "/")
@@ -34,6 +35,7 @@ const Dashboard = () => {
     visualization: boolean;
     schedule: boolean;
   }>({ clinical: false, visualization: false, schedule: false });
+  const [emailing, setEmailing] = useState(false);
 
   useEffect(() => {
     const data = localStorage.getItem("patientData");
@@ -164,6 +166,35 @@ const Dashboard = () => {
       });
     } finally {
       setDownloading((prev) => ({ ...prev, [type]: false }));
+    }
+  };
+
+  // ─── Email Reports ─────────────────────────────────────────────────────────
+  const sendEmailReports = async () => {
+    const email = patientData?.email;
+    if (!email) {
+      toast({ title: "No email address", description: "Please provide an email address in your assessment.", variant: "destructive" });
+      return;
+    }
+    setEmailing(true);
+    try {
+      const response = await fetch(`${API_BASE}/api/email-reports`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(180000),
+        body: JSON.stringify({ patientData, analysis: analysis || undefined, email }),
+      });
+      if (!response.ok) throw new Error(`Server returned ${response.status}`);
+      const data = await response.json();
+      if (data.email_sent) {
+        toast({ title: "Email sent! \uD83D\uDCE7", description: `Reports sent to ${email}. Check your inbox (and spam folder).` });
+      } else {
+        toast({ title: "Email failed", description: "Server could not send the email. Please check SMTP configuration.", variant: "destructive" });
+      }
+    } catch (err: any) {
+      toast({ title: "Email failed", description: err.message || "Could not send email.", variant: "destructive" });
+    } finally {
+      setEmailing(false);
     }
   };
 
@@ -461,6 +492,24 @@ const Dashboard = () => {
                 )}
               </Button>
             </div>
+          </div>
+
+          {/* Email All Reports Button */}
+          <div className="mt-6 pt-4 border-t border-border">
+            <Button
+              onClick={sendEmailReports}
+              disabled={emailing}
+              className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white"
+            >
+              {emailing ? (
+                <><Loader2 className="w-4 h-4 animate-spin" /> Generating & Sending Email...</>
+              ) : (
+                <><Mail className="w-4 h-4" /> Email All Reports to {patientData?.email || "your inbox"}</>
+              )}
+            </Button>
+            <p className="text-xs text-muted-foreground text-center mt-2">
+              Generates all 3 reports and sends them as email attachments
+            </p>
           </div>
         </Card>
 
