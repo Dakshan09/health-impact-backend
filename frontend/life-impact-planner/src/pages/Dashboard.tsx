@@ -19,9 +19,9 @@ import {
   Loader2,
 } from "lucide-react";
 
-let envUrl = import.meta.env.VITE_API_BASE_URL || "https://health-impact-backend.onrender.com";
-if (envUrl === "/" || envUrl === "") envUrl = "https://health-impact-backend.onrender.com";
-const API_BASE = envUrl.replace(/\/$/, "");
+const API_BASE = (import.meta.env.VITE_API_BASE_URL && import.meta.env.VITE_API_BASE_URL !== "/")
+  ? import.meta.env.VITE_API_BASE_URL.replace(/\/$/, "")
+  : "https://health-impact-backend.onrender.com";
 
 const Dashboard = () => {
   const navigate = useNavigate();
