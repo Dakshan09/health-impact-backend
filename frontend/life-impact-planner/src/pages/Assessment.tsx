@@ -163,7 +163,8 @@ const Assessment = () => {
     } else {
       setIsSubmitting(true);
       try {
-        const envUrl = import.meta.env.VITE_API_BASE_URL || "https://health-impact-backend.onrender.com";
+        let envUrl = import.meta.env.VITE_API_BASE_URL || "https://health-impact-backend.onrender.com";
+        if (envUrl === "/" || envUrl === "") envUrl = "https://health-impact-backend.onrender.com";
         const apiBase = envUrl.replace(/\/$/, "");
         const response = await fetch(`${apiBase}/api/submit`, {
           method: "POST",
