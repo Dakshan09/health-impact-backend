@@ -123,37 +123,43 @@ def test_smtp():
     smtp_port = int(os.getenv("SMTP_PORT", "587"))
     smtp_email = os.getenv("SMTP_EMAIL", "")
     smtp_password = os.getenv("SMTP_PASSWORD", "")
-
     result = {
         "smtp_host": smtp_host,
         "smtp_port": smtp_port,
         "smtp_email": smtp_email,
         "smtp_password_set": bool(smtp_password),
         "smtp_password_length": len(smtp_password),
+        "methods_tried": [],
     }
-
     if not smtp_email or not smtp_password:
         result["error"] = "SMTP_EMAIL or SMTP_PASSWORD not configured"
         return result
-
     import smtplib
+    # Try STARTTLS on port 587
     try:
         with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
             server.ehlo()
             server.starttls()
             server.ehlo()
             server.login(smtp_email, smtp_password)
-            result["status"] = "OK - SMTP login successful"
+            result["methods_tried"].append({"method": "starttls", "port": smtp_port, "status": "OK"})
             result["authenticated"] = True
-    except smtplib.SMTPAuthenticationError as e:
-        result["status"] = "FAILED - Authentication error"
-        result["error"] = str(e)
-        result["authenticated"] = False
+            result["status"] = "OK - STARTTLS login successful"
+            return result
     except Exception as e:
-        result["status"] = f"FAILED - {type(e).__name__}"
-        result["error"] = str(e)
-        result["authenticated"] = False
-
+        result["methods_tried"].append({"method": "starttls", "port": smtp_port, "error": str(e)})
+    # Try SSL on port 465
+    try:
+        with smtplib.SMTP_SSL(smtp_host, 465, timeout=15) as server:
+            server.login(smtp_email, smtp_password)
+            result["methods_tried"].append({"method": "ssl", "port": 465, "status": "OK"})
+            result["authenticated"] = True
+            result["status"] = "OK - SSL login successful"
+            return result
+    except Exception as e:
+        result["methods_tried"].append({"method": "ssl", "port": 465, "error": str(e)})
+    result["status"] = "FAILED - All methods failed"
+    result["authenticated"] = False
     return result
 
 # ─── Report models ───────────────────────────────────────────────────────────
