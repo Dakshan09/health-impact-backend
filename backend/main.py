@@ -116,6 +116,46 @@ async def predict_health(request: PredictionRequest):
 def health_check():
     return {"status": "ok"}
 
+@app.get("/api/test-smtp")
+def test_smtp():
+    """Diagnostic endpoint to test SMTP configuration."""
+    smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
+    smtp_port = int(os.getenv("SMTP_PORT", "587"))
+    smtp_email = os.getenv("SMTP_EMAIL", "")
+    smtp_password = os.getenv("SMTP_PASSWORD", "")
+
+    result = {
+        "smtp_host": smtp_host,
+        "smtp_port": smtp_port,
+        "smtp_email": smtp_email,
+        "smtp_password_set": bool(smtp_password),
+        "smtp_password_length": len(smtp_password),
+    }
+
+    if not smtp_email or not smtp_password:
+        result["error"] = "SMTP_EMAIL or SMTP_PASSWORD not configured"
+        return result
+
+    import smtplib
+    try:
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
+            server.ehlo()
+            server.starttls()
+            server.ehlo()
+            server.login(smtp_email, smtp_password)
+            result["status"] = "OK - SMTP login successful"
+            result["authenticated"] = True
+    except smtplib.SMTPAuthenticationError as e:
+        result["status"] = "FAILED - Authentication error"
+        result["error"] = str(e)
+        result["authenticated"] = False
+    except Exception as e:
+        result["status"] = f"FAILED - {type(e).__name__}"
+        result["error"] = str(e)
+        result["authenticated"] = False
+
+    return result
+
 # ─── Report models ───────────────────────────────────────────────────────────
 
 class ReportRequest(BaseModel):
